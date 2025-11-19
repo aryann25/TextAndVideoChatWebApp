@@ -1,0 +1,20 @@
+#Server Configuration
+# ===============================
+server.port=8081
+
+# ===============================
+# Application Name (Eureka uses this)
+# ===============================
+spring.application.name=connect-user-service
+
+# ===============================
+# Eureka Client Configuration
+# ===============================
+eureka.client.service-url.defaultZone=http://localhost:8761/eureka/
+eureka.client.register-with-eureka=true
+eureka.client.fetch-registry=true
+
+# ===============================
+# (Optional) Logging
+# ===============================
+logging.level.com.connect.userservice=INFO
