@@ -1,0 +1,47 @@
+package com.connectapp.chatservice.service;
+
+import com.connectapp.chatservice.entity.Contact;
+import com.connectapp.chatservice.exception.UserNotFoundException;
+import com.connectapp.chatservice.repository.ContactRepository;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+
+@Service
+public class ContactService {
+
+    private final ContactRepository repo;
+    private final RestTemplate restTemplate;
+
+    public ContactService(ContactRepository repo, RestTemplate restTemplate) {
+        this.repo = repo;
+        this.restTemplate = restTemplate;
+    }
+
+    public boolean addContact(String ownerPhone, String contactPhone, String contactName) {
+
+        // 1️⃣ Check if contact user exists in Auth Service
+        String url = "http://localhost:8081/auth/user/exists/" + contactPhone;
+        Boolean exists = restTemplate.getForObject(url, Boolean.class);
+
+        if (exists == null || !exists) {
+            throw new UserNotFoundException("User not registered");
+        }
+
+        // 2️⃣ Check duplicate
+        if (repo.existsByOwnerPhoneAndContactPhone(ownerPhone, contactPhone)) {
+            return false;
+        }
+
+        // 3️⃣ Save
+        repo.save(new Contact(ownerPhone, contactPhone, contactName));
+        return true;
+    }
+
+    public List<Contact> getContacts(String ownerPhone) {
+        return repo.findByOwnerPhone(ownerPhone);
+    }
+}

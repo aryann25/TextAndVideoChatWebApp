@@ -13,5 +13,10 @@ export default defineConfig({
   server: {
     host: true,     // Allow LAN access
     port: 5173      // Optional: set a fixed port
+  },
+  optimizeDeps: {
+    define: {
+      global: 'globalThis'   // ⬅ Fixes SockJS / buffer / STOMP issue
+    }
   }
 })
