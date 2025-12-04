@@ -10,16 +10,16 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/queue", "/topic"); // in-memory broker
-        registry.setApplicationDestinationPrefixes("/app"); // client -> server
-        registry.setUserDestinationPrefix("/user"); // server -> specific user
+        registry.enableSimpleBroker("/queue", "/topic");       // Server -> client
+        registry.setApplicationDestinationPrefixes("/app");    // Client -> server
+        registry.setUserDestinationPrefix("/user");            // For private chats
     }
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
                 .setAllowedOriginPatterns("*")
-                .setHandshakeHandler(new MobilePrincipalHandshakeHandler())
+                .setHandshakeHandler(new MobilePrincipalHandshakeHandler()) // extract phone
                 .addInterceptors(new MobileNumberHandshakeInterceptor())
                 .withSockJS();
     }
