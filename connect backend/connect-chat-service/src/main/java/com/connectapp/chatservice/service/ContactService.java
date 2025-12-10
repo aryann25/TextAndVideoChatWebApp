@@ -4,6 +4,8 @@ import com.connectapp.chatservice.entity.Contact;
 import com.connectapp.chatservice.exception.UserNotFoundException;
 import com.connectapp.chatservice.repository.ContactRepository;
 
+import jakarta.transaction.Transactional;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
@@ -43,5 +45,12 @@ public class ContactService {
 
     public List<Contact> getContacts(String ownerPhone) {
         return repo.findByOwnerPhone(ownerPhone);
+    }
+
+    // 🔥 UPDATED METHOD NAME
+    @Transactional
+    public void updateBlocked(String owner, String contact, boolean blocked) {
+        repo.updateBlocked(owner, contact, blocked);
+        repo.flush(); // ensures immediate DB update
     }
 }

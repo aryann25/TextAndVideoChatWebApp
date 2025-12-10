@@ -66,5 +66,13 @@ public class ChatController {
 
         return chatService.getChatHistory(loggedInPhone, contactPhone);
     }
+    
+ // 🔹 Clear Chat API
+    @DeleteMapping("/clear/{contactPhone}")
+    public void clearChat(@PathVariable String contactPhone,
+                          @RequestHeader("X-Mobile") String loggedInPhone) {
+        chatService.clearChat(loggedInPhone, contactPhone);
+    }
+
 
 }

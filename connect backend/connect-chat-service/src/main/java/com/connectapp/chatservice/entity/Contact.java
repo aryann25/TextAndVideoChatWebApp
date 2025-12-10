@@ -17,6 +17,8 @@ public class Contact {
     private String ownerPhone;
     private String contactPhone;
     private String contactName;
+    private boolean blocked = false;
+
 
     // Optional: convenience constructor without id
     public Contact(String ownerPhone, String contactPhone, String contactName) {

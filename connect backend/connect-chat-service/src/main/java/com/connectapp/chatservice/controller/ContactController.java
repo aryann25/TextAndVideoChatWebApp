@@ -42,9 +42,23 @@ public class ContactController {
         }
     }
 
-
     @GetMapping("/{ownerPhone}")
     public ResponseEntity<List<Contact>> get(@PathVariable String ownerPhone) {
         return ResponseEntity.ok(service.getContacts(ownerPhone));
     }
+
+    // 🔥 FIXED BLOCK ENDPOINT
+    @PatchMapping("/block")
+    public ResponseEntity<?> block(
+            @RequestParam String owner,
+            @RequestParam String contact,
+            @RequestParam boolean blocked) {
+        try {
+            service.updateBlocked(owner, contact, blocked);
+            return ResponseEntity.ok(Map.of("message", "Block status updated", "blocked", blocked));
+        } catch (Exception e) {
+            return ResponseEntity.status(500).body(Map.of("message", "Failed to update block status"));
+        }
+    }
+
 }

@@ -2,6 +2,8 @@ package com.connectapp.chatservice.service;
 
 import com.connectapp.chatservice.entity.Message;
 import com.connectapp.chatservice.repository.MessageRepository;
+
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -30,4 +32,10 @@ public class ChatService {
     public List<Message> getChatHistory(String senderPhone, String receiverPhone) {
         return repository.findChatHistory(senderPhone, receiverPhone);
     }
+    
+    @Transactional
+    public void clearChat(String user, String contact) {
+        repository.deleteChatHistory(user, contact);
+    }
+
 }
