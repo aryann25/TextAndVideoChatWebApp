@@ -8,6 +8,9 @@ import authService from "./services/authService";
 import { addContact, fetchContacts } from "./services/contactService";
 import axios from "axios";
 
+// Backend URL - declared OUTSIDE the component
+const BACKEND_URL = "http://localhost:8082";
+
 export default function Dashboard() {
   const navigate = useNavigate();
   const user = authService.getCurrentUser();
@@ -17,16 +20,21 @@ export default function Dashboard() {
   const [messagesMap, setMessagesMap] = useState({});
   const [inputMessage, setInputMessage] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const [showAddContact, setShowAddContact] = useState(false);
   const [newContactPhone, setNewContactPhone] = useState("");
   const [newContactName, setNewContactName] = useState("");
   const [addContactMessage, setAddContactMessage] = useState("");
   const [showProfile, setShowProfile] = useState(false);
+  const [showContactInfo, setShowContactInfo] = useState(false);
+  const [muted, setMuted] = useState(false);
 
   const stompClientRef = useRef(null);
   const msgEndRef = useRef(null);
   const menuRef = useRef(null);
   const menuButtonRef = useRef(null);
+  const headerMenuRef = useRef(null);
+  const headerMenuButtonRef = useRef(null);
 
   const messages = selectedContact ? messagesMap[selectedContact.contactPhone] || [] : [];
 
@@ -41,10 +49,13 @@ export default function Dashboard() {
       if (menuOpen && menuRef.current && !menuRef.current.contains(e.target) && !menuButtonRef.current?.contains(e.target)) {
         setMenuOpen(false);
       }
+      if (headerMenuOpen && headerMenuRef.current && !headerMenuRef.current.contains(e.target) && !headerMenuButtonRef.current?.contains(e.target)) {
+        setHeaderMenuOpen(false);
+      }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [menuOpen]);
+  }, [menuOpen, headerMenuOpen]);
 
   /* LOAD CONTACTS */
   useEffect(() => {
@@ -57,7 +68,7 @@ export default function Dashboard() {
   const loadMessagesFromServer = async (contactPhone) => {
     try {
       const res = await axios.get(
-        `http://localhost:8082/api/chat/history/${encodeURIComponent(contactPhone)}`,
+        `${BACKEND_URL}/api/chat/history/${encodeURIComponent(contactPhone)}`,
         { headers: { "X-Mobile": user.mobile } }
       );
       const serverMsgs = Array.isArray(res.data) ? res.data : [];
@@ -66,7 +77,11 @@ export default function Dashboard() {
   };
 
   const loadMessages = (contact) => {
-    setSelectedContact(contact);
+    const contactWithBlocked = {
+      ...contact,
+      blocked: contact.blocked ?? false
+    };
+    setSelectedContact(contactWithBlocked);
     setMessagesMap((prev) => ({ ...prev, [contact.contactPhone]: prev[contact.contactPhone] || [] }));
     loadMessagesFromServer(contact.contactPhone);
   };
@@ -76,7 +91,7 @@ export default function Dashboard() {
     if (!user?.mobile) return;
     if (stompClientRef.current) return;
 
-    const socket = new SockJS(`http://localhost:8082/ws?mobile=${encodeURIComponent(user.mobile)}`);
+    const socket = new SockJS(`${BACKEND_URL}/ws?mobile=${encodeURIComponent(user.mobile)}`);
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
@@ -151,6 +166,67 @@ export default function Dashboard() {
     } catch { }
   };
 
+  /* HEADER MENU ACTIONS */
+  const handleViewContact = () => {
+    setShowContactInfo(true);
+    setHeaderMenuOpen(false);
+  };
+
+  const handleClearChat = async () => {
+    if (!selectedContact) return;
+    try {
+      await axios.delete(
+        `${BACKEND_URL}/api/chat/clear/${encodeURIComponent(selectedContact.contactPhone)}`,
+        { headers: { "X-Mobile": user.mobile } }
+      );
+      setMessagesMap((prev) => ({ ...prev, [selectedContact.contactPhone]: [] }));
+      setHeaderMenuOpen(false);
+    } catch (err) {
+      console.error("Error clearing chat:", err);
+    }
+  };
+
+  const handleToggleBlock = async () => {
+    if (!selectedContact) return;
+    try {
+      const newBlockedStatus = !(selectedContact.blocked ?? false);
+      
+      const response = await axios.patch(
+        `${BACKEND_URL}/contacts/block`,
+        {},
+        {
+          params: {
+            owner: user.mobile,
+            contact: selectedContact.contactPhone,
+            blocked: newBlockedStatus
+          }
+        }
+      );
+      
+      console.log("Block toggle success:", response.data);
+      
+      setSelectedContact({ ...selectedContact, blocked: newBlockedStatus });
+      
+      setContacts((prev) =>
+        prev.map((c) =>
+          c.contactPhone === selectedContact.contactPhone
+            ? { ...c, blocked: newBlockedStatus }
+            : c
+        )
+      );
+      setHeaderMenuOpen(false);
+    } catch (err) {
+      console.error("Error toggling block:", err);
+      console.error("Error details:", err.response?.data);
+      alert(`Failed to update block status: ${err.response?.data?.message || err.message}`);
+    }
+  };
+
+  const handleToggleMute = () => {
+    setMuted((prev) => !prev);
+    setHeaderMenuOpen(false);
+  };
+
   const handleLogout = () => {
     authService.logout();
     navigate("/");
@@ -199,18 +275,36 @@ export default function Dashboard() {
                   </div>
                 </div>
 
-                {/* CHAT PANEL - CRITICAL: This must be display flex with flex-column and height 100% */}
-                <div className="col-md-8 d-flex flex-column" style={{ backgroundImage: "url('https://i.ibb.co/MRnkCLY/whatsapp-bg-light.png')", backgroundSize: "cover", height: "100%" }}>
+                {/* CHAT PANEL */}
+                <div className="col-md-8 d-flex flex-column" style={{ height: "100%" }}>
                   
-                  {/* HEADER - Fixed at top */}
-                  <div className="p-3" style={{ background: "#ededed", flexShrink: 0 }}>
+                  {/* HEADER - Fixed at top with menu */}
+                  <div className="p-3 d-flex align-items-center justify-content-between" style={{ background: "#ededed", flexShrink: 0 }}>
                     <div className="fw-semibold">{selectedContact ? selectedContact.contactName : "Select a chat"}</div>
+                    
+                    {selectedContact && (
+                      <div className="position-relative">
+                        <button ref={headerMenuButtonRef} className="btn btn-sm btn-light" onClick={() => setHeaderMenuOpen((s) => !s)}>⋮</button>
+                        {headerMenuOpen && (
+                          <div ref={headerMenuRef} className="position-absolute bg-white shadow rounded" style={{ right: 0, top: "2.5rem", minWidth: 160, zIndex: 2000 }}>
+                            <div className="px-3 py-2" onClick={handleViewContact} style={{ cursor: "pointer" }}>View Contact</div>
+                            <div className="px-3 py-2" onClick={handleClearChat} style={{ cursor: "pointer" }}>Clear Chat</div>
+                            <div className="px-3 py-2" onClick={handleToggleBlock} style={{ cursor: "pointer" }}>
+                              {selectedContact.blocked ? "Unblock" : "Block"}
+                            </div>
+                            <div className="px-3 py-2" onClick={handleToggleMute} style={{ cursor: "pointer" }}>
+                              {muted ? "Unmute" : "Mute"}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* SCROLLABLE MESSAGES AREA ONLY */}
                   <div 
                     className="flex-grow-1 p-3 overflow-auto d-flex flex-column"
-                    style={{ gap: 12, minHeight: 0 }}
+                    style={{ gap: 12, minHeight: 0, background: "#e5ddd5" }}
                   >
                     {messages.map((m, i) => (
                       <div
@@ -290,6 +384,37 @@ export default function Dashboard() {
               </div>
               <div className="modal-footer">
                 <button className="btn btn-primary" onClick={() => setShowProfile(false)}>Close</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showContactInfo && selectedContact && (
+        <div className="modal d-block" tabIndex="-1" style={{ background: "rgba(0,0,0,0.45)" }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5>Contact Info</h5>
+                <button className="btn-close" onClick={() => setShowContactInfo(false)} />
+              </div>
+              <div className="modal-body text-center">
+                <div className="rounded-circle bg-secondary text-white mx-auto d-flex align-items-center justify-content-center mb-3" style={{ width: 80, height: 80, fontSize: 32 }}>
+                  {selectedContact.contactName?.charAt(0).toUpperCase() ?? "C"}
+                </div>
+                <div className="fw-semibold fs-5">{selectedContact.contactName}</div>
+                <div className="mt-3">
+                  <div className="text-muted small">Phone Number</div>
+                  <div>{selectedContact.contactPhone}</div>
+                </div>
+                {selectedContact.blocked && (
+                  <div className="mt-3">
+                    <span className="badge bg-danger">Blocked</span>
+                  </div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button className="btn btn-primary" onClick={() => setShowContactInfo(false)}>Close</button>
               </div>
             </div>
           </div>
