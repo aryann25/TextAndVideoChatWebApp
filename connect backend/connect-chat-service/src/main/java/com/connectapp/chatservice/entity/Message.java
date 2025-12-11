@@ -29,4 +29,10 @@ public class Message {
     private String content;
     private LocalDateTime timestamp = LocalDateTime.now();
     private String status;
+ // New fields for file support
+    private String messageType = "TEXT"; // TEXT, IMAGE, VIDEO, PDF, DOCUMENT
+    private String fileName;
+    
+    @Column(length = 500)
+    private String fileUrl;
 }
