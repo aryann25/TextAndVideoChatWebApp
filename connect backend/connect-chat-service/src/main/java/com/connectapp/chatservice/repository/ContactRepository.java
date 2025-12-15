@@ -19,4 +19,20 @@ public interface ContactRepository extends JpaRepository<Contact, Long> {
     @Query("UPDATE Contact c SET c.blocked = :blocked WHERE c.ownerPhone = :owner AND c.contactPhone = :contact")
     void updateBlocked(String owner, String contact, boolean blocked);
 
+    @Query("""
+    		   SELECT c FROM Contact c
+    		   WHERE c.ownerPhone = :owner
+    		     AND c.contactPhone = :contact
+    		""")
+    		Contact findContact(String owner, String contact);
+    
+    @Query("""
+    	    SELECT c FROM Contact c 
+    	    WHERE c.ownerPhone = :owner 
+    	      AND c.contactPhone = :contact 
+    	      AND c.blocked = true
+    	""")
+    	Contact findBlocked(String owner, String contact);
+
+
 }

@@ -53,4 +53,24 @@ public class ContactService {
         repo.updateBlocked(owner, contact, blocked);
         repo.flush(); // ensures immediate DB update
     }
+    
+    public boolean isBlocked(String sender, String receiver) {
+        Contact contact = repo.findContact(receiver, sender);
+        return contact != null && contact.isBlocked();
+    }
+    
+    public boolean isBlockedEitherWay(String userA, String userB) {
+        Contact aToB = repo.findContact(userA, userB);
+        Contact bToA = repo.findContact(userB, userA);
+
+        return (aToB != null && aToB.isBlocked())
+            || (bToA != null && bToA.isBlocked());
+    }
+    
+    public boolean isBlockedEitherSide(String a, String b) {
+        return repo.findBlocked(a, b) != null || repo.findBlocked(b, a) != null;
+    }
+
+
+
 }

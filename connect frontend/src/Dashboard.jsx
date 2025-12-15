@@ -35,6 +35,9 @@ export default function Dashboard() {
   const [uploading, setUploading] = useState(false);
   const [showImageViewer, setShowImageViewer] = useState(false);
   const [viewerImage, setViewerImage] = useState(null);
+  const [chatBlocked, setChatBlocked] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
+
 
   const stompClientRef = useRef(null);
   const msgEndRef = useRef(null);
@@ -86,14 +89,24 @@ export default function Dashboard() {
   };
 
   const loadMessages = (contact) => {
-    const contactWithBlocked = {
-      ...contact,
-      blocked: contact.blocked ?? false
-    };
-    setSelectedContact(contactWithBlocked);
-    setMessagesMap((prev) => ({ ...prev, [contact.contactPhone]: prev[contact.contactPhone] || [] }));
+    const isBlocked = contact.blocked ?? false;
+
+    setSelectedContact({ ...contact, blocked: isBlocked });
+
+    // 🔥 sync UI block state
+    setChatBlocked(isBlocked);
+    setBlockReason(
+      isBlocked ? "🚫 You blocked this contact" : ""
+    );
+
+    setMessagesMap((prev) => ({
+      ...prev,
+      [contact.contactPhone]: prev[contact.contactPhone] || []
+    }));
+
     loadMessagesFromServer(contact.contactPhone);
   };
+
 
   /* WS CONNECT */
   useEffect(() => {
@@ -112,12 +125,25 @@ export default function Dashboard() {
         const msg = JSON.parse(payload.body);
         const contactPhone = msg.senderPhone === user.mobile ? msg.receiverPhone : msg.senderPhone;
 
+
+        // 🔥 SYSTEM BLOCK / UNBLOCK
+        if (msg.messageType === "SYSTEM") {
+          if (msg.content?.toLowerCase().includes("blocked")) {
+            setChatBlocked(true);
+            setBlockReason(msg.content);
+          }
+          if (msg.content?.toLowerCase().includes("unblocked")) {
+            setChatBlocked(false);
+            setBlockReason("");
+          }
+        }
+
         setMessagesMap((prev) => {
           const existingMessages = prev[contactPhone] || [];
           const messageExists = existingMessages.some(m => m.id === msg.id);
-          
+
           if (messageExists) {
-            const updated = existingMessages.map(m => 
+            const updated = existingMessages.map(m =>
               m.id === msg.id || m.clientTempId === msg.clientTempId ? msg : m
             );
             return { ...prev, [contactPhone]: updated };
@@ -311,7 +337,7 @@ export default function Dashboard() {
       const response = await axios.get(`${BACKEND_URL}${fileUrl}`, {
         responseType: 'blob',
       });
-      
+
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
@@ -336,15 +362,15 @@ export default function Dashboard() {
     if (messageType === "IMAGE") {
       return (
         <div>
-          <img 
+          <img
             src={`${BACKEND_URL}${msg.fileUrl || msg.content}`}
-            alt={msg.fileName || "Image"} 
+            alt={msg.fileName || "Image"}
             style={{ maxWidth: "100%", borderRadius: 8, cursor: "pointer" }}
             onClick={() => handleImageClick(`${BACKEND_URL}${msg.fileUrl || msg.content}`, msg.fileName)}
           />
           <div className="d-flex justify-content-between align-items-center mt-2">
             {msg.fileName && <div className="small">{msg.fileName}</div>}
-            <button 
+            <button
               className="btn btn-sm btn-link p-0"
               onClick={(e) => {
                 e.stopPropagation();
@@ -362,8 +388,8 @@ export default function Dashboard() {
     if (messageType === "VIDEO") {
       return (
         <div>
-          <video 
-            controls 
+          <video
+            controls
             style={{ maxWidth: "100%", borderRadius: 8 }}
             src={`${BACKEND_URL}${msg.fileUrl || msg.content}`}
           >
@@ -371,7 +397,7 @@ export default function Dashboard() {
           </video>
           <div className="d-flex justify-content-between align-items-center mt-2">
             {msg.fileName && <div className="small">{msg.fileName}</div>}
-            <button 
+            <button
               className="btn btn-sm btn-link p-0"
               onClick={() => downloadFile(msg.fileUrl || msg.content, msg.fileName)}
               title="Download"
@@ -385,7 +411,7 @@ export default function Dashboard() {
 
     if (messageType === "PDF" || messageType === "DOCUMENT") {
       return (
-        <div 
+        <div
           className="d-flex align-items-center gap-2 p-2 bg-light rounded"
           style={{ cursor: "pointer" }}
         >
@@ -396,7 +422,7 @@ export default function Dashboard() {
               {messageType === "PDF" ? "PDF Document" : "Document"}
             </div>
           </div>
-          <button 
+          <button
             className="btn btn-sm btn-primary"
             onClick={() => downloadFile(msg.fileUrl || msg.content, msg.fileName)}
             title="Download"
@@ -457,7 +483,7 @@ export default function Dashboard() {
     if (!selectedContact) return;
     try {
       const newBlockedStatus = !(selectedContact.blocked ?? false);
-      
+
       const response = await axios.patch(
         `${BACKEND_URL}/contacts/block`,
         {},
@@ -469,11 +495,11 @@ export default function Dashboard() {
           }
         }
       );
-      
+
       console.log("Block toggle success:", response.data);
-      
+
       setSelectedContact({ ...selectedContact, blocked: newBlockedStatus });
-      
+
       setContacts((prev) =>
         prev.map((c) =>
           c.contactPhone === selectedContact.contactPhone
@@ -544,11 +570,11 @@ export default function Dashboard() {
 
                 {/* CHAT PANEL */}
                 <div className="col-md-8 d-flex flex-column" style={{ height: "100%" }}>
-                  
+
                   {/* HEADER */}
                   <div className="p-3 d-flex align-items-center justify-content-between" style={{ background: "#ededed", flexShrink: 0 }}>
                     <div className="fw-semibold">{selectedContact ? selectedContact.contactName : "Select a chat"}</div>
-                    
+
                     {selectedContact && (
                       <div className="position-relative">
                         <button ref={headerMenuButtonRef} className="btn btn-sm btn-light" onClick={() => setHeaderMenuOpen((s) => !s)}>⋮</button>
@@ -568,14 +594,30 @@ export default function Dashboard() {
                     )}
                   </div>
 
+                  {/*  BLOCKED BANNER */}
+                  {chatBlocked && (
+                    <div
+                      className="text-center py-2 fw-semibold"
+                      style={{
+                        background: "#fdecea",
+                        color: "#b71c1c",
+                        borderBottom: "1px solid #f5c6cb",
+                        fontSize: 14
+                      }}
+                    >
+                      {blockReason || "🚫 You are blocked"}
+                    </div>
+                  )}
+
+
                   {/* MESSAGES */}
-                  <div 
+                  <div
                     className="flex-grow-1 p-3 overflow-auto d-flex flex-column"
                     style={{ gap: 12, minHeight: 0, background: "#e5ddd5" }}
                   >
                     {messages.map((m, i) => {
                       const messageKey = m.id || m.clientTempId || `msg-${i}`;
-                      
+
                       return (
                         <div
                           key={messageKey}
@@ -593,27 +635,27 @@ export default function Dashboard() {
                   {selectedContact && (
                     <div className="p-3" style={{ background: "#f0f0f0", flexShrink: 0 }}>
                       <div className="d-flex gap-2 align-items-center">
-                        <input 
-                          type="file" 
+                        <input
+                          type="file"
                           ref={fileInputRef}
                           onChange={handleFileSelect}
                           accept="image/*,video/*,.pdf,.doc,.docx,.txt"
                           style={{ display: "none" }}
                         />
-                        <button 
+                        <button
                           className="btn btn-outline-secondary"
                           onClick={() => fileInputRef.current?.click()}
                           title="Attach file"
                         >
                           📎
                         </button>
-                        <input 
-                          value={inputMessage} 
-                          onChange={(e) => setInputMessage(e.target.value)} 
-                          type="text" 
-                          className="form-control flex-grow-1" 
-                          placeholder="Type a message..." 
-                          onKeyDown={(e) => e.key === "Enter" && sendMessage()} 
+                        <input
+                          value={inputMessage}
+                          onChange={(e) => setInputMessage(e.target.value)}
+                          type="text"
+                          className="form-control flex-grow-1"
+                          placeholder="Type a message..."
+                          onKeyDown={(e) => e.key === "Enter" && sendMessage()}
                         />
                         <button className="btn btn-primary" onClick={sendMessage}>➤</button>
                       </div>
@@ -651,12 +693,12 @@ export default function Dashboard() {
                     <div className="text-muted">{formatFileSize(filePreview.size)}</div>
                   </div>
                 )}
-                
+
                 {uploading && (
                   <div className="mt-3">
                     <div className="progress" style={{ height: 25 }}>
-                      <div 
-                        className="progress-bar progress-bar-striped progress-bar-animated" 
+                      <div
+                        className="progress-bar progress-bar-striped progress-bar-animated"
                         style={{ width: `${uploadProgress}%` }}
                       >
                         {uploadProgress}%
@@ -666,8 +708,8 @@ export default function Dashboard() {
                 )}
               </div>
               <div className="modal-footer">
-                <button 
-                  className="btn btn-secondary" 
+                <button
+                  className="btn btn-secondary"
                   onClick={uploading ? cancelUpload : cancelFilePreview}
                 >
                   {uploading ? "Cancel Upload" : "Cancel"}
@@ -685,15 +727,15 @@ export default function Dashboard() {
 
       {/* IMAGE VIEWER MODAL */}
       {showImageViewer && viewerImage && (
-        <div 
-          className="modal d-block" 
-          tabIndex="-1" 
+        <div
+          className="modal d-block"
+          tabIndex="-1"
           style={{ background: "rgba(0,0,0,0.95)", zIndex: 3000 }}
           onClick={() => setShowImageViewer(false)}
         >
           <div className="d-flex align-items-center justify-content-center" style={{ height: "100vh", padding: "20px" }}>
             <div style={{ position: "relative", maxWidth: "90%", maxHeight: "90%" }}>
-              <button 
+              <button
                 className="btn btn-light position-absolute top-0 end-0 m-2"
                 style={{ zIndex: 3001 }}
                 onClick={(e) => {
@@ -703,14 +745,14 @@ export default function Dashboard() {
               >
                 ✕
               </button>
-              <img 
-                src={viewerImage.url} 
+              <img
+                src={viewerImage.url}
                 alt={viewerImage.name}
                 style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain" }}
                 onClick={(e) => e.stopPropagation()}
               />
               <div className="text-center mt-2">
-                <button 
+                <button
                   className="btn btn-primary"
                   onClick={(e) => {
                     e.stopPropagation();

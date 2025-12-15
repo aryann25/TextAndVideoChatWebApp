@@ -2,6 +2,8 @@ package com.connectapp.chatservice.controller;
 
 import com.connectapp.chatservice.entity.Message;
 import com.connectapp.chatservice.service.ChatService;
+import com.connectapp.chatservice.service.ContactService;
+
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
@@ -32,33 +34,55 @@ import java.util.UUID;
 public class ChatController {
 
     private final ChatService chatService;
+    private final ContactService contactService;
     private final SimpMessagingTemplate messagingTemplate;
     private static final String UPLOAD_DIR = "uploads/";
 
     @MessageMapping("/send")
     public void send(Message message, Principal principal) {
-        message.setId(null);
-        String senderPhone = (principal != null && principal.getName() != null)
-                ? principal.getName()
-                : message.getSenderPhone();
-        message.setSenderPhone(senderPhone);
+
+    	if (principal == null) return;
+    	String sender = principal.getName();
+
+        String receiver = message.getReceiverPhone();
+
+        // 🔥 BLOCK CHECK
+        if (contactService.isBlockedEitherWay(sender, receiver)) {
+
+            Message toSender = new Message();
+            toSender.setSenderPhone("SYSTEM");
+            toSender.setReceiverPhone(sender);
+            toSender.setMessageType("SYSTEM");
+            toSender.setContent("🚫 You cannot send messages. This chat is blocked.");
+            toSender.setTimestamp(LocalDateTime.now());
+            toSender.setStatus("BLOCKED");
+
+            Message toReceiver = new Message();
+            toReceiver.setSenderPhone("SYSTEM");
+            toReceiver.setReceiverPhone(receiver);
+            toReceiver.setMessageType("SYSTEM");
+            toReceiver.setContent("🚫 This user attempted to message you, but the chat is blocked.");
+            toReceiver.setTimestamp(LocalDateTime.now());
+            toReceiver.setStatus("BLOCKED");
+
+            messagingTemplate.convertAndSendToUser(sender, "/queue/messages", toSender);
+            messagingTemplate.convertAndSendToUser(receiver, "/queue/messages", toReceiver);
+
+            return;
+        }
+
+
+        // normal flow
+        message.setSenderPhone(sender);
         message.setStatus("SENT");
 
         Message saved = chatService.sendMessage(message);
-        saved.setClientTempId(message.getClientTempId());
 
-        messagingTemplate.convertAndSendToUser(
-                saved.getReceiverPhone(),
-                "/queue/messages",
-                saved
-        );
-
-        messagingTemplate.convertAndSendToUser(
-                saved.getSenderPhone(),
-                "/queue/messages",
-                saved
-        );
+        messagingTemplate.convertAndSendToUser(receiver, "/queue/messages", saved);
+        messagingTemplate.convertAndSendToUser(sender, "/queue/messages", saved);
     }
+
+
 
     @PostMapping("/upload")
     public ResponseEntity<?> uploadFile(
@@ -66,6 +90,12 @@ public class ChatController {
             @RequestParam("senderPhone") String senderPhone,
             @RequestParam("receiverPhone") String receiverPhone,
             @RequestHeader("X-Mobile") String loggedInPhone) {
+    	
+    	if (contactService.isBlockedEitherWay(senderPhone, receiverPhone)) {
+    	    return ResponseEntity
+    	            .status(403)
+    	            .body(Map.of("message", "Messaging is blocked"));
+    	}
         
         try {
             File uploadDir = new File(UPLOAD_DIR);
