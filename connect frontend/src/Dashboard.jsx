@@ -9,7 +9,11 @@ import { addContact, fetchContacts } from "./services/contactService";
 import axios from "axios";
 
 // Backend URL - declared OUTSIDE the component
-const BACKEND_URL = "http://localhost:8082";
+/* const BACKEND_URL = "http://localhost:8082";
+const VIDEO_SERVICE_URL = "http://localhost:8085"; */
+const BACKEND_URL = "/api/chat";
+const VIDEO_SERVICE_URL = "/api/video";
+
 
 export default function Dashboard() {
   const navigate = useNavigate();
@@ -50,6 +54,18 @@ export default function Dashboard() {
 
   const messages = selectedContact ? messagesMap[selectedContact.contactPhone] || [] : [];
 
+  /* =========================
+     VIDEO CALL STATE (NEW)
+     ========================= */
+  const videoStompClientRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
+
+  const [incomingCall, setIncomingCall] = useState(null);
+  const [callActive, setCallActive] = useState(false);
+  const [callPartner, setCallPartner] = useState(null);
+
   /* AUTO SCROLL */
   useEffect(() => {
     msgEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -80,7 +96,7 @@ export default function Dashboard() {
   const loadMessagesFromServer = async (contactPhone) => {
     try {
       const res = await axios.get(
-        `${BACKEND_URL}/api/chat/history/${encodeURIComponent(contactPhone)}`,
+        `${BACKEND_URL}/history/${encodeURIComponent(contactPhone)}`,
         { headers: { "X-Mobile": user.mobile } }
       );
       const serverMsgs = Array.isArray(res.data) ? res.data : [];
@@ -113,7 +129,7 @@ export default function Dashboard() {
     if (!user?.mobile) return;
     if (stompClientRef.current) return;
 
-    const socket = new SockJS(`${BACKEND_URL}/ws?mobile=${encodeURIComponent(user.mobile)}`);
+    const socket = new SockJS(`${BACKEND_URL}/ws?mobile=${user.mobile}`);
     const client = new Client({
       webSocketFactory: () => socket,
       reconnectDelay: 5000,
@@ -241,7 +257,7 @@ export default function Dashboard() {
       formData.append("senderPhone", user.mobile);
 
       const response = await axios.post(
-        `${BACKEND_URL}/api/chat/upload`,
+        `${BACKEND_URL}/upload`,
         formData,
         {
           headers: {
@@ -469,7 +485,9 @@ export default function Dashboard() {
     if (!selectedContact) return;
     try {
       await axios.delete(
-        `${BACKEND_URL}/api/chat/clear/${encodeURIComponent(selectedContact.contactPhone)}`,
+        `${BACKEND_URL}/clear/${encodeURIComponent(
+        selectedContact.contactPhone
+      )}`,
         { headers: { "X-Mobile": user.mobile } }
       );
       setMessagesMap((prev) => ({ ...prev, [selectedContact.contactPhone]: [] }));
@@ -525,6 +543,147 @@ export default function Dashboard() {
     navigate("/");
   };
 
+  /* =========================
+     VIDEO WEBSOCKET (FIXED)
+     ========================= */
+  useEffect(() => {
+    if (!user?.mobile) return;
+
+    const socket = new SockJS(`${VIDEO_SERVICE_URL}/ws-video`);
+    const client = new Client({
+      webSocketFactory: () => socket,
+      reconnectDelay: 5000,
+      debug: msg => console.log("[VIDEO-STOMP]", msg)
+    });
+
+    client.onConnect = () => {
+      client.subscribe("/user/queue/call", payload => {
+        const event = JSON.parse(payload.body);
+        if (event.type === "INCOMING_CALL") {
+          setIncomingCall(event);
+        }
+        if (event.type === "CALL_ENDED") {
+          endCall();
+        }
+      });
+
+      client.subscribe("/user/queue/signal", payload => {
+        handleSignal(JSON.parse(payload.body));
+      });
+    };
+
+    client.activate();
+    videoStompClientRef.current = client;
+
+    return () => client.deactivate();
+  }, [user?.mobile]);
+
+  /* =========================
+     WEBRTC HELPERS
+     ========================= */
+  const createPeerConnection = async partner => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    peerConnectionRef.current = pc;
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true
+    });
+
+    localVideoRef.current.srcObject = stream;
+    stream.getTracks().forEach(t => pc.addTrack(t, stream));
+
+    pc.ontrack = e => {
+      remoteVideoRef.current.srcObject = e.streams[0];
+    };
+
+    pc.onicecandidate = e => {
+      if (e.candidate) {
+        videoStompClientRef.current.publish({
+          destination: "/app/signal",
+          body: JSON.stringify({
+            type: "ICE",
+            from: user.mobile,
+            to: partner,
+            data: e.candidate
+          })
+        });
+      }
+    };
+
+    return pc;
+  };
+
+  const startVideoCall = async () => {
+    if (!selectedContact) return;
+
+    setCallPartner(selectedContact.contactPhone);
+    setCallActive(true);
+
+    const pc = await createPeerConnection(selectedContact.contactPhone);
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    videoStompClientRef.current.publish({
+      destination: "/app/call/start",
+      body: JSON.stringify({
+        type: "INCOMING_CALL",
+        from: user.mobile,
+        to: selectedContact.contactPhone,
+        offer
+      })
+    });
+  };
+
+  const acceptCall = async () => {
+    const { from, offer } = incomingCall;
+
+    setIncomingCall(null);
+    setCallPartner(from);
+    setCallActive(true);
+
+    const pc = await createPeerConnection(from);
+    await pc.setRemoteDescription(new RTCSessionDescription(offer));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    videoStompClientRef.current.publish({
+      destination: "/app/call/accept",
+      body: JSON.stringify({
+        from: user.mobile,
+        to: from,
+        answer
+      })
+    });
+  };
+
+  const handleSignal = async signal => {
+    const pc = peerConnectionRef.current;
+    if (!pc) return;
+
+    if (signal.type === "ANSWER") {
+      await pc.setRemoteDescription(new RTCSessionDescription(signal.data));
+    }
+    if (signal.type === "ICE") {
+      await pc.addIceCandidate(new RTCIceCandidate(signal.data));
+    }
+  };
+
+  const endCall = () => {
+    peerConnectionRef.current?.close();
+    peerConnectionRef.current = null;
+
+    localVideoRef.current?.srcObject?.getTracks().forEach(t => t.stop());
+    remoteVideoRef.current?.srcObject?.getTracks().forEach(t => t.stop());
+
+    setCallActive(false);
+    setIncomingCall(null);
+    setCallPartner(null);
+  };
+
   /* UI */
   return (
     <div className="min-vh-100 d-flex align-items-center" style={{ background: "#e5ddd5" }}>
@@ -577,6 +736,15 @@ export default function Dashboard() {
 
                     {selectedContact && (
                       <div className="position-relative">
+                        {/* 📹 VIDEO CALL BUTTON */}
+      <button
+        className="btn btn-sm btn-outline-success"
+        title="Start video call"
+        onClick={() => startVideoCall(selectedContact.contactPhone)}
+      >
+        📹
+      </button>
+
                         <button ref={headerMenuButtonRef} className="btn btn-sm btn-light" onClick={() => setHeaderMenuOpen((s) => !s)}>⋮</button>
                         {headerMenuOpen && (
                           <div ref={headerMenuRef} className="position-absolute bg-white shadow rounded" style={{ right: 0, top: "2.5rem", minWidth: 160, zIndex: 2000 }}>
@@ -849,6 +1017,81 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+       {/* VIDEO CALL OVERLAY */}
+      {callActive && (
+        <div style={videoOverlay}>
+          <video ref={remoteVideoRef} autoPlay playsInline style={remoteVideo} />
+          <video ref={localVideoRef} autoPlay muted playsInline style={localVideo} />
+          <button style={endButton} onClick={endCall}>End Call</button>
+        </div>
+      )}
+
+      {/* INCOMING CALL */}
+      {incomingCall && (
+        <div style={incomingOverlay}>
+          <div style={incomingBox}>
+            <h4>📞 Incoming Video Call</h4>
+            <p>{incomingCall.from}</p>
+            <button className="btn btn-success m-2" onClick={acceptCall}>Accept</button>
+            <button className="btn btn-danger m-2" onClick={endCall}>Reject</button>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
+/* =========================
+   VIDEO INLINE CSS ONLY
+   ========================= */
+const videoOverlay = {
+  position: "fixed",
+  inset: 0,
+  background: "black",
+  zIndex: 9999
+};
+
+const remoteVideo = {
+  width: "100%",
+  height: "100%",
+  objectFit: "cover"
+};
+
+const localVideo = {
+  position: "absolute",
+  bottom: 20,
+  right: 20,
+  width: 220,
+  height: 160,
+  borderRadius: 8,
+  border: "2px solid white"
+};
+
+const endButton = {
+  position: "absolute",
+  top: 20,
+  right: 20,
+  background: "red",
+  color: "white",
+  padding: "10px 16px",
+  border: "none",
+  borderRadius: 6
+};
+
+const incomingOverlay = {
+  position: "fixed",
+  inset: 0,
+  background: "rgba(0,0,0,0.6)",
+  zIndex: 10000,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center"
+};
+
+const incomingBox = {
+  background: "#fff",
+  padding: 20,
+  borderRadius: 8,
+  textAlign: "center"
+};
